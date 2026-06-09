@@ -3,4 +3,6 @@ The lighter version of ShadowNet that implements everything the ShadowNet does b
 
 This version forces all systemwide connection through Lokinet while still implementing Lokinet/i2p as the cover traffic.
 
-No tor. (This is less secure than the orignal ShadowNet but offers faster browsing)
+NO TOR!
+
+(This is less secure than the orignal ShadowNet but offers faster browsing)
