@@ -343,8 +343,8 @@ void start_shadownet() {
 	execute_14_tier_sanitation("heartbeat");
 	execute_14_tier_sanitation("shadownet_engine");
 	execute_14_tier_sanitation("i2pd");
-	safe_execute("sudo systemctl stop chrony ntp systemd-timesyncd i2pd 2>/dev/null");
-	safe_execute("sudo systemctl mask chrony ntp systemd-timesyncd 2>/dev/null");
+	safe_execute("sudo systemctl stop chrony ntp i2pd 2>/dev/null");
+	safe_execute("sudo systemctl mask chrony ntp 2>/dev/null");
 	if (safe_execute("ps -ef | grep 'heartbeat\\|shadownet_engine' | grep -v grep > /dev/null 2>&1") == 0) {
 		printf("\033[0;31m[!] CRITICAL: Failed to forcefully terminate old processes. Aborting.\033[0m\n");
 		exit(1);
@@ -506,6 +506,8 @@ void start_shadownet() {
 	safe_execute("iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT");
 	safe_execute("iptables -A OUTPUT -o lokitun0 -m state --state ESTABLISHED,RELATED -j ACCEPT");
 	safe_execute("iptables -A OUTPUT -o lo -j ACCEPT; iptables -A INPUT -i lo -j ACCEPT");
+	safe_execute("sudo systemctl unmask systemd-timesyncd 2>/dev/null");
+	safe_execute("sudo systemctl start systemd-timesyncd 2>/dev/null");
 	// Replaced sprintf with snprintf
 	snprintf(cmd, sizeof(cmd), "iptables -A FORWARD -i lokitun0 -o %.16s -j ACCEPT", int_if);
 	safe_execute(cmd);
@@ -573,6 +575,7 @@ void start_shadownet() {
 	safe_execute("sudo ip route add 127.0.0.0/8 dev lo table i2p_table 2>/dev/null; sudo ip route add default dev lokitun0 table i2p_table");
 	safe_execute("sudo ip rule add uidrange 1000-1000 table i2p_table");
 	safe_execute("I2PD_UID=$(id -u i2pd 2>/dev/null); [ -n \"$I2PD_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $I2PD_UID ! -o lokitun0 -j REJECT");
+	safe_execute("I2PD_UID=$(id -u i2pd 2>/dev/null); [ -n \"$I2PD_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $I2PD_UID ! -o lokitun0 -j DROP");
 	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner i2pd ! -o lokitun0 -j REJECT");
 	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner i2pd ! -o lokitun0 -j DROP");
 	safe_execute("sudo ip route flush cache");
