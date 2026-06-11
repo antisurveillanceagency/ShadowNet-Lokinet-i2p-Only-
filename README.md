@@ -7,6 +7,10 @@ NO TOR!
 
 (This is less secure than the orignal ShadowNet but offers faster browsing)
 
+The only thing that was changed is the systemd-timesyncd. Instead of stopping this and masking this which
+would break the i2p, this is now unmasked and started but only after the local loopback establishing and the exceptions.
+This ensures that this stays alive and is started long enough for i2p to reach its tunnels but not long enough to hit the physical interface because it will hit the DROP Policy!
+
 
 how to install:
 
