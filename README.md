@@ -1,11 +1,11 @@
-# ShadowNet-Lokinet-i2p-Only-
+# ShadowNet LI
 The lighter version of ShadowNet that implements everything the ShadowNet does but only stripping away the Tor from the route.
 
 This version forces all systemwide connection through Lokinet while still implementing Lokinet/i2p as the cover traffic.
 
 NO TOR!
 
-(This is less secure than the orignal ShadowNet but offers faster browsing)
+ShadowNet LI is neither less or more secure than ShadowNet, it's all down to your preference and the way you compare the 2.
 
 The only thing that was changed is the systemd-timesyncd. Instead of stopping this and masking this which
 would break the i2p, this is now unmasked and started but only after the local loopback establishing and the exceptions.
