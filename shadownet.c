@@ -12,9 +12,7 @@
 // Global variable required by the monitoring loop condition
 int proc_missing = 0;
 
-/* Helper function to securely execute commands using fork and execve,
- * replacing the vulnerable system() call completely while maintaining execution context.
- */
+/* Helper function to securely execute commands using fork and execve, * replacing the vulnerable system() call completely while maintaining execution context. */
 int safe_execute(const char *cmd_string) {
 	pid_t pid = fork();
 	if (pid == 0) {
@@ -102,7 +100,7 @@ double get_loopix_poisson_delay(double lambda) {
 }
 
 void execute_14_tier_sanitation(const char *name) {
-	char cmd[2048];
+	char cmd[4096];
 	char short_name[16];
 	strncpy(short_name, name, 15);
 	short_name[15] = '\0';
@@ -196,20 +194,15 @@ void stop_shadownet() {
 	safe_execute("sudo rm -f /etc/NetworkManager/conf.d/dhcp-anon.conf");
 	safe_execute("systemctl restart NetworkManager");
 	safe_execute("sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1");
-
 	// Clean up XDP killswitch attachments (FIXED: Formatted into buffer before calling safe_execute)
 	char xdp_off_cmd[256];
 	snprintf(xdp_off_cmd, sizeof(xdp_off_cmd), "sudo ip link set dev %.16s xdp off 2>/dev/null", int_if);
 	safe_execute(xdp_off_cmd);
-
 	safe_execute("sudo rm -f /sys/fs/bpf/shadownet_lockdown_map 2>/dev/null");
 	printf("\033[1;31m[-] ShadowNet Deactivated. Integrity Restored.\033[0m\n");
 }
 
-/* eBPP Entropy Helper Function
- * Performs advanced /dev/urandom structural scrambling on local address space routing,
- * custom protocol headers, and handles high-resolution sub-second entropy timing delays.
- */
+/* eBPP Entropy Helper Function * Performs advanced /dev/urandom structural scrambling on local address space routing, * custom protocol headers, and handles high-resolution sub-second entropy timing delays. */
 void ebpp_entropy_scramble(char *rand_dest_ip, char *rand_src_ip, int *tos_val) {
 	unsigned char stream[8];
 	struct timespec ns_jitter;
@@ -246,6 +239,11 @@ void start_shadownet() {
 	int fixed_mtu = 1400;
 	int fixed_payload_size = get_entropy_delay(500, fixed_mtu - 42);
 	int start_iat_jitter = get_entropy_delay(5, 20);
+
+	// Moved all global strict drop policies to the top of the function before background services are touched
+	safe_execute("iptables -P INPUT DROP; iptables -P FORWARD DROP; iptables -P OUTPUT DROP");
+	safe_execute("ip6tables -P INPUT DROP; ip6tables -P FORWARD DROP; ip6tables -P OUTPUT DROP");
+
 	printf("\033[1;33m[*] Applying Entropy IAT: %ds before starting ShadowNet...\033[0m\n", start_iat_jitter);
 	sleep(start_iat_jitter);
 	int hw_iat;
@@ -417,12 +415,10 @@ void start_shadownet() {
 	char ebpp_mangle_cmd[512];
 	snprintf(ebpp_mangle_cmd, sizeof(ebpp_mangle_cmd), "sudo iptables -t mangle -A OUTPUT -o %.16s -j TOS --set-tos %d 2>/dev/null", int_if, ebpp_tos_val);
 	safe_execute(ebpp_mangle_cmd);
-
 	// Enforcing Loopix Poisson Persona configurations dynamically through random choice from /dev/urandom
 	unsigned char urand_roll = 0;
 	FILE *f_roll = fopen("/dev/urandom", "rb");
 	if (f_roll) { fread(&urand_roll, 1, 1, f_roll); fclose(f_roll); }
-
 	sleep(2);
 	if (safe_execute("ps -ef | grep '/dev/shm/shadownet_engine' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat' | grep -v grep > /dev/null") != 0) {
 		printf("\033[0;31m[!] CRITICAL: Core processes failed to lock in RAM. Aborting for OpSec.\033[0m\n");
@@ -475,13 +471,11 @@ void start_shadownet() {
 	printf("\033[1;32m[+] Session Identity Assigned: Alias-Fixed (Assigned Cover Packet Size: %d bytes)\033[0m\n", fixed_payload_size + 42);
 	printf("\033[0;32m[+] Identity Shifted. Cover Traffic & Temporal Jitter Engaged (Locked at %dMbit in RAM).\033[0m\n", target_mbit);
 	printf("\033[1;32m[+] Packet Max MTU Size: %d bytes | Target Rate: %d Mbit.\033[0m\n", fixed_mtu, target_mbit);
-
 	safe_execute("sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null; "
 	"sudo sysctl -w net.ipv4.ip_default_ttl=128 >/dev/null; "
 	"sudo sysctl -w net.ipv4.tcp_timestamps=0 >/dev/null; "
 	"sudo sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null; "
 	"sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1");
-
 	snprintf(cmd, sizeof(cmd), "sudo tc qdisc del dev %.16s root 2>/dev/null", int_if);
 	safe_execute(cmd);
 	usleep(200000);
@@ -506,6 +500,15 @@ void start_shadownet() {
 	safe_execute("iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT");
 	safe_execute("iptables -A OUTPUT -o lokitun0 -m state --state ESTABLISHED,RELATED -j ACCEPT");
 	safe_execute("iptables -A OUTPUT -o lo -j ACCEPT; iptables -A INPUT -i lo -j ACCEPT");
+
+	// Dynamically pull systemd-timesyncd uid, lock its traffic to lokitun0, and drop it everywhere else
+	safe_execute("TIMESYNC_UID=$(id -u systemd-timesync 2>/dev/null); "
+	"if [ -n \"$TIMESYNC_UID\" ]; then "
+	" iptables -A OUTPUT -o lokitun0 -m owner --uid-owner $TIMESYNC_UID -j ACCEPT; "
+	" iptables -A OUTPUT -m owner --uid-owner $TIMESYNC_UID ! -o lokitun0 -j DROP; "
+	"fi");
+
+	// Background execution configuration
 	safe_execute("sudo systemctl unmask systemd-timesyncd 2>/dev/null");
 	safe_execute("sudo systemctl start systemd-timesyncd 2>/dev/null");
 	// Replaced sprintf with snprintf
@@ -532,7 +535,6 @@ void start_shadownet() {
 		usleep(1000);
 		trigger_emergency_lockdown();
 	}
-
 	char i2pd_uid_buf[32] = {0};
 	FILE *uid_fp = popen("id -u i2pd 2>/dev/null", "r");
 	if (uid_fp) {
@@ -545,10 +547,8 @@ void start_shadownet() {
 		usleep(1000);
 		trigger_emergency_lockdown();
 	}
-
 	snprintf(cmd, sizeof(cmd), "sudo ip rule del uidrange %s-%s table i2p_table 2>/dev/null; sudo ip rule add uidrange %s-%s table i2p_table", i2pd_uid_buf, i2pd_uid_buf, i2pd_uid_buf, i2pd_uid_buf);
 	safe_execute(cmd);
-
 	snprintf(cmd, sizeof(cmd), "LOKI_UID=$(id -u _lokinet 2>/dev/null || id -u lokinet 2>/dev/null); "
 	"I2PD_UID=%s; "
 	"if [ -n \"$LOKI_UID\" ]; then "
@@ -573,17 +573,13 @@ void start_shadownet() {
 	safe_execute("echo \"200 i2p_table\" | sudo tee -a /etc/iproute2/rt_tables");
 	safe_execute("sudo ip rule add from 172.16.0.1 table i2p_table");
 	safe_execute("sudo ip route add 127.0.0.0/8 dev lo table i2p_table 2>/dev/null; sudo ip route add default dev lokitun0 table i2p_table");
-	safe_execute("sudo ip rule add uidrange 1000-1000 table i2p_table");
+	safe_execute("USER_UID=$(id -u $SUDO_USER 2>/dev/null || id -u); [ -n \"$USER_UID\" ] && sudo ip rule add uidrange $USER_UID-$USER_UID table i2p_table");
 	safe_execute("I2PD_UID=$(id -u i2pd 2>/dev/null); [ -n \"$I2PD_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $I2PD_UID ! -o lokitun0 -j REJECT");
 	safe_execute("I2PD_UID=$(id -u i2pd 2>/dev/null); [ -n \"$I2PD_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $I2PD_UID ! -o lokitun0 -j DROP");
 	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner i2pd ! -o lokitun0 -j REJECT");
 	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner i2pd ! -o lokitun0 -j DROP");
 	safe_execute("sudo ip route flush cache");
-	/* Inline eBPF Engine Generation and Deployment Hook
-	 * Compiles an inline eBPF classifier program that implements advanced /dev/urandom
-	 * entropy-based sub-second Inter-Arrival Time (IAT) delays, full context packet rerouting,
-	 * and parameter rewriting safely within the kernel workspace.
-	 */
+	/* Inline eBPF Engine Generation and Deployment Hook * Compiles an inline eBPF classifier program that implements advanced /dev/urandom * entropy-based sub-second Inter-Arrival Time (IAT) delays, full context packet rerouting, * and parameter rewriting safely within the kernel workspace. */
 	printf("\033[1;36m[*] Injecting eBPF Subsystem for Core Dynamic Packet Processing & Rerouting...\033[0m\n");
 	FILE *ebpf_f = fopen("/dev/shm/shadownet_ebpf.c", "w");
 	if (ebpf_f) {
@@ -648,13 +644,11 @@ void start_shadownet() {
 		unsigned long long curr_loki_bytes = 0;
 		unsigned long long curr_phys_bytes = 0;
 		struct timespec rf_iat;
-
 		// Implemented continuous Loopix Poisson decay mathematical spacing using raw urandom entropy stream
 		double p_delay = get_loopix_poisson_delay(15.0);
 		rf_iat.tv_sec = (long)p_delay;
 		rf_iat.tv_nsec = (long)((p_delay - rf_iat.tv_sec) * 1000000000.0) % 1000000000L;
 		nanosleep(&rf_iat, NULL);
-
 		int current_rf = get_entropy_delay(8, 20);
 		char rf_cmd[256];
 		// Hardened to safely assign current_rf variable parameter
@@ -663,7 +657,6 @@ void start_shadownet() {
 		if (safe_execute("iw reg get | grep -q 'country GB'") == 0) {
 			safe_execute("sudo iw reg set US 2>/dev/null || sudo iw reg set CA 2>/dev/null");
 		}
-
 		proc_missing = (safe_execute("ps -ef | grep '/dev/shm/shadownet_engine' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat' | grep -v grep > /dev/null") != 0 || safe_execute("systemctl is-active --quiet lokinet") != 0 || safe_execute("systemctl is-active --quiet i2pd") != 0);
 		snprintf(traffic_check_cmd, sizeof(traffic_check_cmd), "ip link show %s | grep -q 'UP'", int_if);
 		int phys_dead = (safe_execute(traffic_check_cmd) != 0);
