@@ -132,9 +132,10 @@ void trigger_emergency_lockdown() {
 	safe_execute("iptables -F; iptables -t nat -F; iptables -t mangle -F");
 	safe_execute("ip6tables -F; ip6tables -t nat -F; ip6tables -t mangle -F");
 	execute_14_tier_sanitation("heartbeat");
+	execute_14_tier_sanitation("heartbeat2");
 	execute_14_tier_sanitation("shadownet_engine");
-	execute_14_tier_sanitation("i2pd");
-	safe_execute("sudo systemctl stop lokinet i2pd");
+	execute_14_tier_sanitation("tor");
+	safe_execute("sudo systemctl stop lokinet tor");
 	printf("\n\033[0;31m\a[!!!] SHADOWNET EMERGENCY LOCKDOWN ENGAGED. INTERNET PERMANENTLY KILLED.\033[0m\n");
 	printf("\033[1;33m[*] Run 'sudo ./shadownet stop' manually to restore connectivity.\033[0m\n");
 	exit(1);
@@ -157,18 +158,19 @@ void stop_shadownet() {
 	int wait_time = get_entropy_delay(5, 60);
 	printf("\033[1;31m[*] Finalizing teardown... Waiting %d seconds.\033[0m\n", wait_time);
 	sleep(wait_time);
-	safe_execute("sudo systemctl stop lokinet i2pd 2>/dev/null");
+	safe_execute("sudo systemctl stop lokinet tor 2>/dev/null");
 	safe_execute("sudo systemctl unmask chrony ntp systemd-timesyncd 2>/dev/null");
 	safe_execute("sudo systemctl start chrony ntp systemd-timesyncd 2>/dev/null");
 	execute_14_tier_sanitation("heartbeat");
+	execute_14_tier_sanitation("heartbeat2");
 	execute_14_tier_sanitation("shadownet_engine");
-	execute_14_tier_sanitation("i2pd");
+	execute_14_tier_sanitation("tor");
 	safe_execute("sudo rfkill unblock bluetooth 2>/dev/null");
 	safe_execute("sudo modprobe uvcvideo 2>/dev/null");
 	safe_execute("sudo modprobe snd_hda_intel 2>/dev/null");
 	safe_execute("sudo chattr -i /sys/firmware/efi/efivars/* 2>/dev/null");
-	safe_execute("rm -f /dev/shm/shadownet_heartbeat.pid /dev/shm/shadownet_engine.pid");
-	safe_execute("rm -f /dev/shm/heartbeat /dev/shm/shadownet_engine");
+	safe_execute("rm -f /dev/shm/shadownet_heartbeat.pid /dev/shm/shadownet_heartbeat2.pid /dev/shm/shadownet_engine.pid");
+	safe_execute("rm -f /dev/shm/heartbeat /dev/shm/heartbeat2 /dev/shm/shadownet_engine");
 	safe_execute("sudo sysctl -w net.ipv4.ip_default_ttl=64 >/dev/null");
 	safe_execute("sudo sysctl -w net.ipv4.tcp_timestamps=1 >/dev/null");
 	safe_execute("sudo sysctl -w net.ipv4.ip_no_pmtu_disc=0 >/dev/null");
@@ -192,7 +194,7 @@ void stop_shadownet() {
 	safe_execute("iptables -F; iptables -t nat -F; iptables -t mangle -F");
 	safe_execute("ip6tables -F; ip6tables -t nat -F; ip6tables -t mangle -F");
 	safe_execute("sudo rm -f /etc/NetworkManager/conf.d/dhcp-anon.conf");
-	safe_execute("systemctl restart NetworkManager");
+	safe_execute("safe_execute(\"systemctl restart NetworkManager\");");
 	safe_execute("sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1");
 	// Clean up XDP killswitch attachments (FIXED: Formatted into buffer before calling safe_execute)
 	char xdp_off_cmd[256];
@@ -332,22 +334,23 @@ void start_shadownet() {
 	get_interface(int_if);
 	char cmd[2048];
 	signal(SIGINT, handle_sigint);
-	if (access("./heartbeat.c", F_OK) == -1 || access("./shadownet_engine.c", F_OK) == -1) {
-		printf("\033[0;31m[!] CRITICAL: heartbeat.c or shadownet_engine.c missing. Aborting.\033[0m\n");
+	if (access("./heartbeat.c", F_OK) == -1 || access("./heartbeat2.c", F_OK) == -1 || access("./shadownet_engine.c", F_OK) == -1) {
+		printf("\033[0;31m[!] CRITICAL: heartbeat.c, heartbeat2.c or shadownet_engine.c missing. Aborting.\033[0m\n");
 		exit(1);
 	}
 	int target_mbit = get_entropy_delay(5, 20);
 	printf("\033[1;30m[*] Executing 14-Tier Process Sanitation & Guarding...\033[0m\n");
 	execute_14_tier_sanitation("heartbeat");
+	execute_14_tier_sanitation("heartbeat2");
 	execute_14_tier_sanitation("shadownet_engine");
-	execute_14_tier_sanitation("i2pd");
-	safe_execute("sudo systemctl stop chrony ntp i2pd 2>/dev/null");
+	execute_14_tier_sanitation("tor");
+	safe_execute("sudo systemctl stop chrony ntp tor 2>/dev/null");
 	safe_execute("sudo systemctl mask chrony ntp 2>/dev/null");
-	if (safe_execute("ps -ef | grep 'heartbeat\\|shadownet_engine' | grep -v grep > /dev/null 2>&1") == 0) {
+	if (safe_execute("ps -ef | grep 'heartbeat\\|heartbeat2\\|shadownet_engine' | grep -v grep > /dev/null 2>&1") == 0) {
 		printf("\033[0;31m[!] CRITICAL: Failed to forcefully terminate old processes. Aborting.\033[0m\n");
 		exit(1);
 	}
-	safe_execute("rm -f /dev/shm/shadownet_heartbeat.pid /dev/shm/shadownet_engine.pid /dev/shm/heartbeat /dev/shm/shadownet_engine");
+	safe_execute("rm -f /dev/shm/shadownet_heartbeat.pid /dev/shm/shadownet_heartbeat2.pid /dev/shm/shadownet_engine.pid /dev/shm/heartbeat /dev/shm/heartbeat2 /dev/shm/shadownet_engine");
 	safe_execute("iptables -P OUTPUT DROP");
 	// Explicitly search for _lokinet or lokinet user ids to preserve system infrastructure compatibility dynamically
 	safe_execute("LOKI_UID=$(id -u _lokinet 2>/dev/null || id -u lokinet 2>/dev/null); "
@@ -373,10 +376,11 @@ void start_shadownet() {
 	int post_loki_iat = get_entropy_delay(15, 30);
 	printf("\033[1;33m[*] Applying Bootstrap Entropy: %ds allowing Lokinet to build paths...\033[0m\n", post_loki_iat);
 	sleep(post_loki_iat);
-	printf("\033[1;33m[*] Applying Entropy IAT: %ds before i2pd Initialization...\033[0m\n", get_entropy_delay(6, 12));
-	printf("\033[1;36m[*] Rewriting and Hardening i2pd Interface Parameters...\033[0m\n");
-	safe_execute("printf 'ifname = lokitun0\\nifname4 = 172.16.0.1\\naddress4 = 172.16.0.1\\nport = 4567\\nipv4 = true\\nipv6 = false\\n[ntcp2]\\nenabled = true\\nport = 4567\\n[ssu2]\\n[http]\\nenabled = true\\naddress = 172.16.0.1\\nport = 7070\\n[httpproxy]\\nenabled = true\\naddress = 172.16.0.1\\nport = 4444\\noutproxy = false.i2p\\n[socksproxy]\\nenabled = true\\naddress = 172.16.0.1\\nport = 4447\\n[sam]\\nenabled = true\\naddress = 172.16.0.1\\nport = 7656\\nportudp = 7655\\n[bob]\\nenabled = true\\naddress = 172.16.0.1\\nport = 2827\\n[i2cp]\\nenabled = true\\naddress = 172.16.0.1\\nport = 7654\\n[i2pcontrol]\\nenabled = true\\naddress = 172.16.0.1\\nport = 7650\\n[precomputation]\\n[upnp]\\n[meshnets]\\n[reseed]\\nverify = true\\n[addressbook]\\n[limits]\\n[trust]\\n[exploratory]\\n[persist]\\n' | sudo tee /etc/i2pd/i2pd.conf > /dev/null");
-	safe_execute("sudo systemctl start i2pd");
+	printf("\033[1;33m[*] Applying Entropy IAT: %ds before Tor Initialization...\033[0m\n", get_entropy_delay(6, 12));
+	printf("\033[1;36m[*] Rewriting and Hardening Tor Interface Parameters...\033[0m\n");
+	safe_execute("printf 'SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort IsolateClientProtocol IsolateClientAddr IsolateSOCKSAuth\\nSocksPolicy accept 127.0.0.1\\nEnforceDistinctSubnets 1\\nNumEntryGuards 1\\nLongLivedPorts 21,22,706,1863,5050,5190,6667,6697,8300\\nCircuitBuildTimeout 60\\nMaxCircuitDirtiness 1\\nNewCircuitPeriod 1\\nReducedConnectionPadding 0\\nConnectionPadding 1\\nReducedCircuitPadding 0\\nCircuitPadding 1\\nOutboundBindAddress 172.16.0.1\\n' | sudo tee /etc/tor/torrc > /dev/null");
+	safe_execute("sudo chown debian-tor:debian-tor /etc/tor/torrc 2>/dev/null || sudo chown tor:tor /etc/tor/torrc 2>/dev/null");
+	safe_execute("sudo systemctl start tor");
 	snprintf(cmd, sizeof(cmd), "sudo ip link set %.16s mtu %d", int_if, fixed_mtu);
 	safe_execute(cmd);
 	safe_execute("sudo sysctl -w net.ipv4.ip_no_pmtu_disc=1 >/dev/null");
@@ -386,10 +390,10 @@ void start_shadownet() {
 	printf("\033[1;33m[*] Applying Entropy IAT: %ds after Identity Shift...\033[0m\n", post_mac_jitter);
 	sleep(post_mac_jitter);
 	safe_execute("iptables -I OUTPUT -o lokitun0 -p udp --dport 443 -j ACCEPT; iptables -I OUTPUT -o lokitun0 -p udp --dport 53 -j ACCEPT");
-	// FIXED: Added -lm flag to the compilation step of shadownet_engine to prevent structural reference link crashes
 	safe_execute("cp ./heartbeat.c /dev/shm/heartbeat.c 2>/dev/null; gcc /dev/shm/heartbeat.c -o /dev/shm/heartbeat 2>/dev/null -lm; "
+	"cp ./heartbeat2.c /dev/shm/heartbeat2.c 2>/dev/null; gcc /dev/shm/heartbeat2.c -o /dev/shm/heartbeat2 2>/dev/null -lm; "
 	"gcc ./shadownet_engine.c -o /dev/shm/shadownet_engine 2>/dev/null -lm");
-	if (access("/dev/shm/shadownet_engine", F_OK) == -1 || access("/dev/shm/heartbeat", F_OK) == -1) {
+	if (access("/dev/shm/shadownet_engine", F_OK) == -1 || access("/dev/shm/heartbeat", F_OK) == -1 || access("/dev/shm/heartbeat2", F_OK) == -1) {
 		printf("\033[0;31m[!] CRITICAL: Binaries failed to generate in RAM directory. Aborting.\033[0m\n");
 		stop_shadownet();
 		exit(1);
@@ -412,6 +416,8 @@ void start_shadownet() {
 	safe_execute(engine_cmd_buf);
 	snprintf(cmd, sizeof(cmd), "sudo nice -n -20 nohup /dev/shm/heartbeat %d %d %d %d > /dev/null 2>&1 & echo $! > /dev/shm/shadownet_heartbeat.pid", fixed_mtu, target_mbit, alias_roll, fixed_payload_size);
 	safe_execute(cmd);
+	snprintf(cmd, sizeof(cmd), "sudo nice -n -20 nohup /dev/shm/heartbeat2 %d %d %d %d > /dev/null 2>&1 & echo $! > /dev/shm/shadownet_heartbeat2.pid", fixed_mtu, target_mbit, alias_roll, fixed_payload_size);
+	safe_execute(cmd);
 	char ebpp_mangle_cmd[512];
 	snprintf(ebpp_mangle_cmd, sizeof(ebpp_mangle_cmd), "sudo iptables -t mangle -A OUTPUT -o %.16s -j TOS --set-tos %d 2>/dev/null", int_if, ebpp_tos_val);
 	safe_execute(ebpp_mangle_cmd);
@@ -420,7 +426,7 @@ void start_shadownet() {
 	FILE *f_roll = fopen("/dev/urandom", "rb");
 	if (f_roll) { fread(&urand_roll, 1, 1, f_roll); fclose(f_roll); }
 	sleep(2);
-	if (safe_execute("ps -ef | grep '/dev/shm/shadownet_engine' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat' | grep -v grep > /dev/null") != 0) {
+	if (safe_execute("ps -ef | grep '/dev/shm/shadownet_engine' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat2' | grep -v grep > /dev/null") != 0) {
 		printf("\033[0;31m[!] CRITICAL: Core processes failed to lock in RAM. Aborting for OpSec.\033[0m\n");
 		stop_shadownet();
 		exit(1);
@@ -535,34 +541,34 @@ void start_shadownet() {
 		usleep(1000);
 		trigger_emergency_lockdown();
 	}
-	char i2pd_uid_buf[32] = {0};
-	FILE *uid_fp = popen("id -u i2pd 2>/dev/null", "r");
+	char tor_uid_buf[32] = {0};
+	FILE *uid_fp = popen("id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null", "r");
 	if (uid_fp) {
-		if (fgets(i2pd_uid_buf, sizeof(i2pd_uid_buf) - 1, uid_fp) != NULL) {
-			i2pd_uid_buf[strcspn(i2pd_uid_buf, "\n\r ")] = 0;
+		if (fgets(tor_uid_buf, sizeof(tor_uid_buf) - 1, uid_fp) != NULL) {
+			tor_uid_buf[strcspn(tor_uid_buf, "\n\r ")] = 0;
 		}
 		pclose(uid_fp);
 	}
-	if (strlen(i2pd_uid_buf) == 0) {
+	if (strlen(tor_uid_buf) == 0) {
 		usleep(1000);
 		trigger_emergency_lockdown();
 	}
-	snprintf(cmd, sizeof(cmd), "sudo ip rule del uidrange %s-%s table i2p_table 2>/dev/null; sudo ip rule add uidrange %s-%s table i2p_table", i2pd_uid_buf, i2pd_uid_buf, i2pd_uid_buf, i2pd_uid_buf);
+	snprintf(cmd, sizeof(cmd), "sudo ip rule del uidrange %s-%s table tor_table 2>/dev/null; sudo ip rule add uidrange %s-%s table tor_table", tor_uid_buf, tor_uid_buf, tor_uid_buf, tor_uid_buf);
 	safe_execute(cmd);
 	snprintf(cmd, sizeof(cmd), "LOKI_UID=$(id -u _lokinet 2>/dev/null || id -u lokinet 2>/dev/null); "
-	"I2PD_UID=%s; "
+	"TOR_UID=%s; "
 	"if [ -n \"$LOKI_UID\" ]; then "
 	" iptables -A OUTPUT -o %.16s -m owner --uid-owner $LOKI_UID -j ACCEPT; "
 	" iptables -A OUTPUT -o %.16s -m owner ! --uid-owner $LOKI_UID -j DROP; "
 	"else "
 	" iptables -A OUTPUT -o %.16s -j DROP; "
 	"fi; "
-	"if [ -n \"$I2PD_UID\" ]; then "
-	" iptables -A OUTPUT -o lokitun0 -m owner --uid-owner $I2PD_UID -j ACCEPT; "
+	"if [ -n \"$TOR_UID\" ]; then "
+	" iptables -A OUTPUT -o lokitun0 -m owner --uid-owner $TOR_UID -j ACCEPT; "
 	"fi; "
 	"iptables -A OUTPUT -o lo -j ACCEPT; "
 	"iptables -A OUTPUT -o lokitun0 -j ACCEPT; "
-	"iptables -A OUTPUT -d 127.0.0.0/8 -j ACCEPT", i2pd_uid_buf, int_if, int_if, int_if);
+	"iptables -A OUTPUT -d 127.0.0.0/8 -j ACCEPT", tor_uid_buf, int_if, int_if, int_if);
 	safe_execute(cmd);
 	safe_execute("iptables -A OUTPUT -m length --length 1401:65535 -j DROP");
 	safe_execute("iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable");
@@ -570,14 +576,14 @@ void start_shadownet() {
 	printf("\033[1;31m[!] EMERGENCY KILLSWITCH ENGAGED: Realistic 100ms Guarding Active...\033[0m\n");
 	// Added: create /etc/iproute2 directory if it doesn't exist
 	safe_execute("sudo mkdir -p /etc/iproute2");
-	safe_execute("echo \"200 i2p_table\" | sudo tee -a /etc/iproute2/rt_tables");
-	safe_execute("sudo ip rule add from 172.16.0.1 table i2p_table");
-	safe_execute("sudo ip route add 127.0.0.0/8 dev lo table i2p_table 2>/dev/null; sudo ip route add default dev lokitun0 table i2p_table");
-	safe_execute("USER_UID=$(id -u $SUDO_USER 2>/dev/null || id -u); [ -n \"$USER_UID\" ] && sudo ip rule add uidrange $USER_UID-$USER_UID table i2p_table");
-	safe_execute("I2PD_UID=$(id -u i2pd 2>/dev/null); [ -n \"$I2PD_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $I2PD_UID ! -o lokitun0 -j REJECT");
-	safe_execute("I2PD_UID=$(id -u i2pd 2>/dev/null); [ -n \"$I2PD_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $I2PD_UID ! -o lokitun0 -j DROP");
-	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner i2pd ! -o lokitun0 -j REJECT");
-	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner i2pd ! -o lokitun0 -j DROP");
+	safe_execute("echo \"200 tor_table\" | sudo tee -a /etc/iproute2/rt_tables");
+	safe_execute("sudo ip rule add from 172.16.0.1 table tor_table");
+	safe_execute("sudo ip route add 127.0.0.0/8 dev lo table tor_table 2>/dev/null; sudo ip route add default dev lokitun0 table tor_table");
+	safe_execute("USER_UID=$(id -u $SUDO_USER 2>/dev/null || id -u); [ -n \"$USER_UID\" ] && sudo ip rule add uidrange $USER_UID-$USER_UID table tor_table");
+	safe_execute("TOR_UID=$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null); [ -n \"$TOR_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $TOR_UID ! -o lokitun0 -j REJECT");
+	safe_execute("TOR_UID=$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null); [ -n \"$TOR_UID\" ] && sudo iptables -A OUTPUT -m owner --uid-owner $TOR_UID ! -o lokitun0 -j DROP");
+	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner debian-tor ! -o lokitun0 -j REJECT 2>/dev/null || sudo iptables -A OUTPUT -m owner --uid-owner tor ! -o lokitun0 -j REJECT");
+	safe_execute("sudo iptables -A OUTPUT -m owner --uid-owner debian-tor ! -o lokitun0 -j DROP 2>/dev/null || sudo iptables -A OUTPUT -m owner --uid-owner tor ! -o lokitun0 -j DROP");
 	safe_execute("sudo ip route flush cache");
 	/* Inline eBPF Engine Generation and Deployment Hook * Compiles an inline eBPF classifier program that implements advanced /dev/urandom * entropy-based sub-second Inter-Arrival Time (IAT) delays, full context packet rerouting, * and parameter rewriting safely within the kernel workspace. */
 	printf("\033[1;36m[*] Injecting eBPF Subsystem for Core Dynamic Packet Processing & Rerouting...\033[0m\n");
@@ -657,7 +663,7 @@ void start_shadownet() {
 		if (safe_execute("iw reg get | grep -q 'country GB'") == 0) {
 			safe_execute("sudo iw reg set US 2>/dev/null || sudo iw reg set CA 2>/dev/null");
 		}
-		proc_missing = (safe_execute("ps -ef | grep '/dev/shm/shadownet_engine' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat' | grep -v grep > /dev/null") != 0 || safe_execute("systemctl is-active --quiet lokinet") != 0 || safe_execute("systemctl is-active --quiet i2pd") != 0);
+		proc_missing = (safe_execute("ps -ef | grep '/dev/shm/shadownet_engine' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat' | grep -v grep > /dev/null") != 0 || safe_execute("ps -ef | grep '/dev/shm/heartbeat2' | grep -v grep > /dev/null") != 0 || safe_execute("systemctl is-active --quiet lokinet") != 0 || safe_execute("systemctl is-active --quiet tor") != 0);
 		snprintf(traffic_check_cmd, sizeof(traffic_check_cmd), "ip link show %s | grep -q 'UP'", int_if);
 		int phys_dead = (safe_execute(traffic_check_cmd) != 0);
 		int tun_dead = (safe_execute("ip link show lokitun0 > /dev/null 2>&1") != 0);
